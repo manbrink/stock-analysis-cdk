@@ -4,8 +4,12 @@ from aws_cdk import (aws_ec2 as ec2,
                      aws_ecs as ecs,
                      aws_ecr as ecr,
                      aws_ecs_patterns as ecs_patterns,
-                     Stack, CfnOutput
+                     Stack, CfnOutput, Duration
                     )
+
+import os, dotenv
+
+dotenv.load_dotenv()
 
 class StockAnalysisCdkStack(Stack):
 
@@ -25,19 +29,19 @@ class StockAnalysisCdkStack(Stack):
         # VPC Interface Endpoints
         ec2.InterfaceVpcEndpoint(self, "VPC Endpoint Docker",
             vpc=vpc,
-            service=ec2.InterfaceVpcEndpointService("com.amazonaws.us-west-1.ecr.dkr"),
+            service=ec2.InterfaceVpcEndpointService(f"com.amazonaws.{os.environ.get('AWS_REGION')}.ecr.dkr"),
         )
 
         ec2.InterfaceVpcEndpoint(self, "VPC Endpoint ECR API",
             vpc=vpc,
-            service=ec2.InterfaceVpcEndpointService("com.amazonaws.us-west-1.ecr.api"),
+            service=ec2.InterfaceVpcEndpointService(f"com.amazonaws.{os.environ.get('AWS_REGION')}.ecr.api"),
         )
 
         # ECR Repo
         repository = ecr.Repository.from_repository_arn(
             self,
             construct_id,
-            repository_arn="arn:aws:ecr:us-west-1:234126427467:repository/stock-analysis-api")
+            repository_arn=os.environ.get('ECR_REPO_ARN'))
         
         # ECS Cluster
         cluster = ecs.Cluster(self, "StockAnalysisCluster", vpc=vpc)
@@ -55,6 +59,17 @@ class StockAnalysisCdkStack(Stack):
             peer = ec2.Peer.ipv4(vpc.vpc_cidr_block),
             connection = ec2.Port.tcp(80),
             description="Allow http inbound from VPC"
+        )
+
+        # AutoScaling policy
+        scaling = fargate_service.service.auto_scale_task_count(
+            max_capacity=2
+        )
+        scaling.scale_on_cpu_utilization(
+            "CpuScaling",
+            target_utilization_percent=50,
+            scale_in_cooldown=Duration.seconds(60),
+            scale_out_cooldown=Duration.seconds(60),
         )
 
         CfnOutput(
